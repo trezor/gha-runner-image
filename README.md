@@ -2,8 +2,8 @@
 
 Custom runner image for the ARC scale set
 (`gh-arc-runners` namespace). Based on `ghcr.io/actions/actions-runner`
-with common tooling preinstalled: jq, yq, gh CLI, kubectl, git,
-curl, zip/unzip, rsync, make, python3.
+with common tooling preinstalled: jq, yq, gh CLI, kubectl, docker
+compose, git, curl, zip/unzip, rsync, make, python3.
 
 ## Upgrading
 
