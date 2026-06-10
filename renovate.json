@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    "docker:pinDigests"
+  ],
+  "packageRules": [
+    {
+      "description": "Group action digest/version bumps into one PR",
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Track ARG *_VERSION pins in the Dockerfile via '# renovate:' annotations",
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)Dockerfile$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)( versioning=(?<versioning>[^\\s]+))?\\s+ARG [A-Z_]+_VERSION=(?<currentValue>[^\\s]+)"
+      ]
+    }
+  ]
+}
