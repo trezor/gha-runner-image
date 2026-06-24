@@ -1,7 +1,7 @@
 # Custom GitHub Actions runner image for the trezor-hq-selfhosted ARC scale set.
 # Base image ships the runner, Docker CLI and buildx — we only add tooling on top.
 # The CI workflow derives image tags from this FROM line; bump it to upgrade the runner.
-FROM ghcr.io/actions/actions-runner:2.335.1
+FROM ghcr.io/actions/actions-runner:2.335.1@sha256:08c30b0a7105f64bddfc485d2487a22aa03932a791402393352fdf674bda2c29
 
 USER root
 
