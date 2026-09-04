@@ -51,7 +51,7 @@ RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
 
 # docker compose v2 CLI plugin (base image ships docker CLI + buildx, but not compose)
 # renovate: datasource=github-releases depName=docker/compose
-ARG COMPOSE_VERSION=v5.1.4
+ARG COMPOSE_VERSION=v5.5.1
 RUN mkdir -p /usr/local/lib/docker/cli-plugins \
     && curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
         "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-x86_64" \
