@@ -48,3 +48,33 @@ jobs:
           push: true
           tags: |
             ${{ env.IMAGE }}:${{ steps.version.outputs.runner }}
+
+  # Renovate automerges base bumps without pre-merge checks, so the patch
+  # guard fires post-merge: red main must announce itself or a missing image
+  # tag stays invisible until deprecation day.
+  report-failure:
+    needs: build
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TITLE='Runner image build failed on main'
+          BODY="Automerged bump failed to build after merge: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} - the image tag derived from this commit was NOT published."
+          ISSUE=$(gh issue list --state open --label build-failure --json number,title \
+            --jq '.[] | select(.title == "'"$TITLE"'") | .number' | head -1 || true)
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --body "$BODY"
+          else
+            gh label create build-failure --color B60205 --force
+            NUMBER=$(gh issue create --title "$TITLE" --label build-failure --body "$BODY" | grep -oE '[0-9]+$')
+            # best-effort: a token without org read must not cost us the issue itself
+            gh issue edit "$NUMBER" --add-team trezor/platform-devops \
+              || echo "::warning::assigned to no one - could not assign @trezor/platform-devops to issue #${NUMBER}"
+          fi

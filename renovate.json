@@ -5,6 +5,8 @@
     "helpers:pinGitHubActionDigests",
     "docker:pinDigests"
   ],
+  "automerge": true,
+  "automergeType": "pr",
   "packageRules": [
     {
       "description": "Group action digest/version bumps into one PR",
