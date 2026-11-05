@@ -1,0 +1,186 @@
+name: Runner deprecations check
+
+# Control-plane job stays GitHub-hosted on purpose: it must keep running
+# after deprecated self-hosted runners stop receiving messages (silent
+# refusal). The durable artifacts are the issue and the failing check.
+#
+# Fool-proofing rules encoded here:
+# - a payload WITHOUT the expected "runners" key is an ERROR, never read as
+#   "no deprecations" (schema drift must not produce a false green);
+# - every issue path self-creates its label and best-effort-assigns the
+#   platform team (a workflow token lacking org read must not lose the issue);
+# - the heartbeat issue is stamped on EVERY completed run: a stamp older than
+#   two weeks means the schedule itself died, which nothing else can detect.
+
+on:
+  schedule:
+    - cron: '0 7 * * 1' # weekly, Monday 07:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  TEAM: trezor/platform-devops
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DEPRECATIONS_FILE: ${{ runner.temp }}/runner-deprecations.json
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Determine pinned runner version
+        run: |
+          set -euo pipefail
+          PINNED=$(sed -n 's|^FROM ghcr.io/actions/actions-runner:\([^@ ]*\).*|\1|p' Dockerfile)
+          test -n "$PINNED" || { echo "::error::could not parse runner version from Dockerfile"; exit 1; }
+          echo "pinned_runner=$PINNED" >> "$GITHUB_ENV"
+
+      - name: Fetch runner deprecations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api /repos/actions/runner-tool-image-maintenance/runners/deprecations \
+            > "$DEPRECATIONS_FILE"
+          if ! jq -e 'has("runners")' "$DEPRECATIONS_FILE" >/dev/null; then
+            echo "::error::deprecations payload has no 'runners' key - upstream snapshot changed shape; refusing to report an all-clear"
+            exit 1
+          fi
+
+      - name: Upsert deprecation issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          LABEL='runner-deprecations'
+
+          COUNT=$(jq '[ (.runners // [])[] ] | length' "$DEPRECATIONS_FILE")
+          if [ "$COUNT" -eq 0 ]; then
+            echo "No runner deprecations reported; nothing to file."
+            exit 0
+          fi
+
+          parse_runners() {
+            jq -r '
+              [ (.runners // [])[]
+                | . as $r
+                | (if ($r | type) == "object" then $r else {version: $r} end)
+                | [ (.version // .runner_version // "unknown"),
+                    ((.deprecation_date // .deprecates_on // .date // "") | tostring) ]
+                | @tsv ]
+              | .[]' "$DEPRECATIONS_FILE"
+          }
+
+          TOP_DATE=$(parse_runners | cut -f2 | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' | sort | tail -n1 || true)
+          TOP_VERSION=$(parse_runners | sort | tail -n1 | cut -f1)
+          if [ -n "$TOP_DATE" ]; then
+            TITLE="Runner ${TOP_VERSION} deprecation ${TOP_DATE}"
+          else
+            TITLE="Runner ${TOP_VERSION} deprecation"
+          fi
+
+          ISSUE=$(gh issue list --label "$LABEL" --state open --limit 100 --json number,title \
+            --jq '.[] | [.number, .title] | @tsv' \
+            | awk -F'\t' -v t="$TITLE" '$2 == t { print $1; exit }' || true)
+
+          BODY_FILE=$(mktemp)
+          {
+            echo 'GitHub has announced deprecation of the following runner versions. Self-hosted runners on a deprecated version keep registering but stop receiving jobs — bump the pinned base image before the date passes.'
+            echo
+            echo '| Deprecated runner | Deprecation date |'
+            echo '| --- | --- |'
+            parse_runners | sort | awk -F'\t' '{ printf "| %s | %s |\n", $1, (length($2) ? $2 : "unknown") }'
+            echo
+            if jq -e --arg v "$pinned_runner" '[ (.runners // [])[]
+                 | (.version // .runner_version // .) | tostring | sub("^v";"") ]
+                 | any(. == $v)' "$DEPRECATIONS_FILE" >/dev/null; then
+              echo "Pinned in this repo's Dockerfile: \`$pinned_runner\` — **DEPRECATED, bump the base image now**."
+            else
+              echo "Pinned in this repo's Dockerfile: \`$pinned_runner\` — not deprecated."
+            fi
+            echo
+            echo 'Tracking: https://github.com/actions/runner-images/issues'
+          } > "$BODY_FILE"
+
+          if [ -n "$ISSUE" ]; then
+            # mentions in comments notify the team; assignment pings only once
+            printf '\n@%s\n' "$TEAM" >> "$BODY_FILE"
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$BODY_FILE"
+            echo "Updated existing issue #${ISSUE}: ${TITLE}"
+          else
+            gh label create "$LABEL" --color B60205 --force
+            NUMBER=$(gh issue create --title "$TITLE" --label "$LABEL" \
+              --body "$BODY_FILE" | grep -oE '[0-9]+$')
+            gh issue edit "$NUMBER" --add-team "$TEAM" \
+              || echo "::warning::could not assign @${TEAM} to issue #${NUMBER}"
+            echo "Created issue #${NUMBER}: ${TITLE}"
+          fi
+          rm -f "$BODY_FILE"
+
+      # Issue first, fail last: the durable artifact must exist even when
+      # this check goes red.
+      - name: Fail when the pinned runner is deprecated
+        run: |
+          set -euo pipefail
+          if jq -e --arg v "$pinned_runner" '[ (.runners // [])[]
+               | (.version // .runner_version // .) | tostring | sub("^v";"") ]
+               | any(. == $v)' "$DEPRECATIONS_FILE" >/dev/null; then
+            echo "::error::Runner $pinned_runner (pinned in Dockerfile) is deprecated — bump the base image and rebuild before job dispatch stops."
+            exit 1
+          fi
+          echo "Pinned runner $pinned_runner is not deprecated."
+
+      - name: Stamp heartbeat
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TITLE='Runner deprecations watchdog status'
+          BODY="Last watchdog run: $(date -u +%FT%TZ), job conclusion: ${{ job.status }}. A stamp older than 14 days means the schedule itself stopped running - verify Actions schedules are enabled for this repo. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          STAMP=$(gh issue list --label watchdog-status --state open --json number,title \
+            --jq '.[] | [.number, .title] | @tsv' \
+            | awk -F'\t' -v t="$TITLE" '$2 == t { print $1; exit }' || true)
+          if [ -n "$STAMP" ]; then
+            gh issue comment "$STAMP" --repo "$GITHUB_REPOSITORY" --body "$BODY"
+          else
+            gh label create watchdog-status --color 0E8A16 --force
+            NUMBER=$(gh issue create --title "$TITLE" --label watchdog-status \
+              --body "$BODY" | grep -oE '[0-9]+$')
+            gh issue edit "$NUMBER" --add-team "$TEAM" \
+              || echo "::warning::could not assign @${TEAM} to issue #${NUMBER}"
+          fi
+
+  # Covers the checker's own death: API outage, schema break, quota - any
+  # red run of the watchdog itself becomes an assigned issue, not an email
+  # to whoever last touched the file.
+  report-failure:
+    needs: check
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Open or update watchdog failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TITLE='Runner deprecations watchdog failed'
+          BODY="The weekly deprecations check itself failed - deprecation coverage is blind until fixed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ISSUE=$(gh issue list --state open --label watchdog-failure --json number,title \
+            --jq '.[] | [.number, .title] | @tsv' \
+            | awk -F'\t' -v t="$TITLE" '$2 == t { print $1; exit }' || true)
+          if [ -n "$ISSUE" ]; then
+            gh issue comment "$ISSUE" --body "$BODY @${TEAM}"
+          else
+            gh label create watchdog-failure --color B60205 --force
+            NUMBER=$(gh issue create --title "$TITLE" --label watchdog-failure --body "$BODY" | grep -oE '[0-9]+$')
+            gh issue edit "$NUMBER" --add-team "$TEAM" \
+              || echo "::warning::could not assign @${TEAM} to issue #${NUMBER}"
+          fi
