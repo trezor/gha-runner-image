@@ -20,7 +20,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
         python3-pip \
         python3-venv \
+        zstd \
     && rm -rf /var/lib/apt/lists/*
+
+# ghac: keep an operator-set ACTIONS_RESULTS_URL across the runner's step-env
+# clobber (see scripts/patch-results-url.py). Set ACTIONS_RESULTS_URL (trailing
+# slash!) on the runner pod; a base bump that moves the literal fails this layer.
+# Based on https://gha-cache-server.falcondev.io/getting-started#binary-patch
+COPY scripts/patch-results-url.py /tmp/patch-results-url.py
+RUN python3 /tmp/patch-results-url.py /home/runner/bin/Runner.Worker.dll \
+    && rm /tmp/patch-results-url.py
 
 # yq (mikefarah Go version, installed as a static binary)
 # renovate: datasource=github-releases depName=mikefarah/yq

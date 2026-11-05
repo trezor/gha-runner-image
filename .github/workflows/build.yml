@@ -47,7 +47,7 @@ jobs:
           context: .
           push: true
           tags: |
-            ${{ env.IMAGE }}:${{ steps.version.outputs.runner }}
+            ${{ env.IMAGE }}:${{ steps.version.outputs.runner }}-gha-patched
 
   # Renovate automerges base bumps without pre-merge checks, so the patch
   # guard fires post-merge: red main must announce itself or a missing image
