@@ -33,7 +33,7 @@ RUN python3 /tmp/patch-results-url.py /home/runner/bin/Runner.Worker.dll \
 
 # yq (mikefarah Go version, installed as a static binary)
 # renovate: datasource=github-releases depName=mikefarah/yq
-ARG YQ_VERSION=v4.53.3
+ARG YQ_VERSION=v4.54.2
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
         "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
         -o /usr/local/bin/yq \
