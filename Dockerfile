@@ -23,10 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         zstd \
     && rm -rf /var/lib/apt/lists/*
 
-# ghac: keep an operator-set ACTIONS_RESULTS_URL across the runner's step-env
-# clobber (see scripts/patch-results-url.py). Set ACTIONS_RESULTS_URL (trailing
-# slash!) on the runner pod; a base bump that moves the literal fails this layer.
-# Based on https://gha-cache-server.falcondev.io/getting-started#binary-patch
+# ghac: stop the runner overwriting our cache/results URLs. Set both on the runner pod
+# (trailing slash). Fails this layer if a base bump moves a literal.
+# Recipe: https://gha-cache-server.falcondev.io/getting-started#binary-patch
 COPY scripts/patch-results-url.py /tmp/patch-results-url.py
 RUN python3 /tmp/patch-results-url.py /home/runner/bin/Runner.Worker.dll \
     && rm /tmp/patch-results-url.py

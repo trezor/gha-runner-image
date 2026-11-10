@@ -1,55 +1,56 @@
 #!/usr/bin/env python3
-"""ghac patch: keep a custom ACTIONS_RESULTS_URL across the runner's step-env clobber.
-
-The stock runner rewrites ACTIONS_RESULTS_URL into every step's environment from the
-job message (NodeScriptActionHandler / ContainerActionHandler), which silently pins
-actions/cache (service v2 reads this variable and nothing else) to GitHub even when
-the operator sets their own URL on the runner.
-
-Fix: rename the UTF-16LE literal `ACTIONS_RESULTS_URL` to an equal-length dummy
-`ACTIONS_RESULTS_ORL` in the compiled binary, so the clobber lands on a variable
-nobody reads and the operator-provided ACTIONS_RESULTS_URL survives into the step.
-Same recipe as https://gha-cache-server.falcondev.io/getting-started#binary-patch,
-with build-time assertions added.
-
-The assertions exist because a lost patch fails SILENTLY at runtime (cache quietly
-returns to GitHub, no job errors): if a base-image bump moves, splits, or natively
-fixes the literal, this script must fail the build loudly instead.
+"""Rename the runner's URL literals to same-length dummies so its per-step env clobber
+misses them and our pod-level URLs reach the steps. The checks are the point: a patch lost
+to a base bump fails silently at runtime, so it has to fail the build.
 """
 import sys
 
-OLD = "ACTIONS_RESULTS_URL".encode("utf-16-le")
-NEW = "ACTIONS_RESULTS_ORL".encode("utf-16-le")
+LITERALS = [
+    ("ACTIONS_RESULTS_URL", "ACTIONS_RESULTS_ORL"),
+    ("ACTIONS_CACHE_URL", "ACTIONS_CACHE_ORL"),
+]
 DEFAULT_TARGET = "/home/runner/bin/Runner.Worker.dll"
+
+
+def fatal(msg: str) -> int:
+    print(f"ghac-patch: FATAL — {msg}", file=sys.stderr)
+    return 1
 
 
 def patch(path: str) -> int:
     with open(path, "rb") as f:
         data = f.read()
+    original_len = len(data)
 
-    old_n, new_n = data.count(OLD), data.count(NEW)
-    if old_n == 0 and new_n == 1:
-        print(f"ghac-patch: {path} is already patched — OK")
-        return 0
-    if old_n != 1:
-        print(
-            f"ghac-patch: FATAL — expected the ACTIONS_RESULTS_URL literal exactly "
-            f"once in {path}, found old={old_n} new={new_n}.\n"
-            "The runner binary changed (literal moved/duplicated, or upstream added a "
-            "native override). Do NOT ship this base image: without the patch the "
-            "cache silently reverts to GitHub. Investigate before merging the bump.",
-            file=sys.stderr,
-        )
-        return 1
+    for old, new in LITERALS:
+        if len(old) != len(new):
+            return fatal(f"replacement {new!r} is not equal length to {old!r}")
+        old_b, new_b = old.encode("utf-16-le"), new.encode("utf-16-le")
+        old_n, new_n = data.count(old_b), data.count(new_b)
 
-    patched = data.replace(OLD, NEW)
-    if patched.count(OLD) != 0 or patched.count(NEW) != 1 or len(patched) != len(data):
-        print("ghac-patch: FATAL — post-patch verification failed", file=sys.stderr)
-        return 1
+        if old_n == 0 and new_n == 1:
+            print(f"ghac-patch: {old} already patched — OK")
+            continue
+        if old_n != 1:
+            return fatal(
+                f"expected the {old} literal exactly once in {path}, "
+                f"found old={old_n} new={new_n}.\n"
+                "The runner binary changed (literal moved/duplicated, or upstream added a "
+                "native override). Do NOT ship this base image: without the patch the cache "
+                "silently reverts to GitHub. Investigate before merging the bump."
+            )
+
+        data = data.replace(old_b, new_b)
+
+    for old, new in LITERALS:
+        old_b, new_b = old.encode("utf-16-le"), new.encode("utf-16-le")
+        if data.count(old_b) != 0 or data.count(new_b) != 1 or len(data) != original_len:
+            return fatal(f"post-patch verification failed for {old} in {path}")
 
     with open(path, "wb") as f:
-        f.write(patched)
-    print(f"ghac-patch: patched {path} (ACTIONS_RESULTS_URL -> ACTIONS_RESULTS_ORL)")
+        f.write(data)
+    names = ", ".join(f"{o} -> {n}" for o, n in LITERALS)
+    print(f"ghac-patch: patched {path} ({names})")
     return 0
 
 
