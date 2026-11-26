@@ -4,7 +4,8 @@ Custom runner image for the ARC scale set
 (`gh-arc-runners` namespace). Based on `ghcr.io/actions/actions-runner`
 with common tooling preinstalled: jq, yq, gh CLI, kubectl, docker
 compose, git, curl, zip/unzip, rsync, make, python3, zstd (fast
-`actions/cache` archive compression).
+`actions/cache` archive compression), libatomic1 (runtime dep of official
+Node.js >= 25 binaries — without it `setup-node` Node 26 will not start).
 
 ## ghac cache patch
 
