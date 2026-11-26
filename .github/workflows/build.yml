@@ -17,7 +17,24 @@ env:
 
 jobs:
   build:
+    name: build (${{ matrix.variant }})
     runs-on: trezor-hq-selfhosted
+    # One leg per variant, both scheduled at once on their own runner.
+    # fail-fast keeps a failure in one leg from cancelling the other: each
+    # tag is published (or not) on its own, and both results are reported.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Unpatched - for pools without ACTIONS_RESULTS_URL/ACTIONS_CACHE_URL.
+          - variant: unpatched
+            build_arg: GHAC_PATCH=false
+            tag_suffix: ""
+          # ghac-patched - requires ACTIONS_RESULTS_URL/ACTIONS_CACHE_URL in
+          # the runner pod env (see Dockerfile note); tag suffix -gha-patched.
+          - variant: patched
+            build_arg: GHAC_PATCH=true
+            tag_suffix: "-gha-patched"
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -42,12 +59,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+      # Variant comes from the matrix: GHAC_PATCH=false tags the plain
+      # <version> image, GHAC_PATCH=true the <version>-gha-patched one.
+      - name: Build and push image (${{ matrix.variant }})
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
           push: true
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.version.outputs.runner }}-gha-patched
+          build-args: ${{ matrix.build_arg }}
+          tags: ${{ env.IMAGE }}:${{ steps.version.outputs.runner }}${{ matrix.tag_suffix }}
 
   # Renovate automerges base bumps without pre-merge checks, so the patch
   # guard fires post-merge: red main must announce itself or a missing image
@@ -66,7 +86,7 @@ jobs:
         run: |
           set -euo pipefail
           TITLE='Runner image build failed on main'
-          BODY="Automerged bump failed to build after merge: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} - the image tag derived from this commit was NOT published."
+          BODY="Automerged bump failed to build after merge: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} - the failing variant's tag was NOT published (image tags for this commit: <version>, <version>-gha-patched)."
           ISSUE=$(gh issue list --state open --label build-failure --json number,title \
             --jq '.[] | select(.title == "'"$TITLE"'") | .number' | head -1 || true)
           if [ -n "$ISSUE" ]; then

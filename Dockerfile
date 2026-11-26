@@ -28,14 +28,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# ghac: keep an operator-set ACTIONS_RESULTS_URL across the runner's step-env
-# clobber (see scripts/patch-results-url.py). Set ACTIONS_RESULTS_URL (trailing
-# slash!) on the runner pod; a base bump that moves the literal fails this layer.
-# Based on https://gha-cache-server.falcondev.io/getting-started#binary-patch
-COPY scripts/patch-results-url.py /tmp/patch-results-url.py
-RUN python3 /tmp/patch-results-url.py /home/runner/bin/Runner.Worker.dll \
-    && rm /tmp/patch-results-url.py
-
 # yq (mikefarah Go version, installed as a static binary)
 # renovate: datasource=github-releases depName=mikefarah/yq
 ARG YQ_VERSION=v4.53.3
@@ -72,6 +64,24 @@ RUN mkdir -p /usr/local/lib/docker/cli-plugins \
         -o /usr/local/lib/docker/cli-plugins/docker-compose \
     && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose \
     && docker compose version
+
+# Image variants: GHAC_PATCH=true (default) applies the ghac binary patch and
+# CI publishes it as <version>-gha-patched; GHAC_PATCH=false leaves
+# Runner.Worker.dll untouched and CI publishes the plain <version> tag.
+# The patch layer is last so both variants share every preceding layer.
+# NOTE: pools running the patched image MUST set ACTIONS_RESULTS_URL and
+# ACTIONS_CACHE_URL (trailing slash!) in the runner pod env — the patch makes
+# the runner stop providing them (see patch-results-url.py).
+ARG GHAC_PATCH=true
+# ghac: keep an operator-set ACTIONS_RESULTS_URL across the runner's step-env
+# clobber (see scripts/patch-results-url.py). A base bump that moves the
+# literal fails this layer. Based on
+# https://gha-cache-server.falcondev.io/getting-started#binary-patch
+COPY scripts/patch-results-url.py /tmp/patch-results-url.py
+RUN if [ "$GHAC_PATCH" = "true" ]; then \
+        python3 /tmp/patch-results-url.py /home/runner/bin/Runner.Worker.dll; \
+    fi \
+    && rm /tmp/patch-results-url.py
 
 # The runner must start as the unprivileged runner user (uid 1001)
 USER runner

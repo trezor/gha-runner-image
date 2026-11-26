@@ -7,6 +7,15 @@ compose, git, curl, zip/unzip, rsync, make, python3, zstd (fast
 `actions/cache` archive compression), libatomic1 (runtime dep of official
 Node.js >= 25 binaries — without it `setup-node` Node 26 will not start).
 
+## Image variants
+
+CI publishes **two tags** per `FROM` version: `<version>` (unpatched) and
+`<version>-gha-patched` (ghac-patched). Same Dockerfile, gated by the
+`GHAC_PATCH` build arg; the patch layer is last, so the two images share every
+other layer. CI builds both variants concurrently, one job each. Pools choosing
+the patched tag must set `ACTIONS_RESULTS_URL` and `ACTIONS_CACHE_URL` in the
+runner pod env (see note in the Dockerfile).
+
 ## ghac cache patch
 
 `scripts/patch-results-url.py` renames the `ACTIONS_RESULTS_URL` literal in the
