@@ -5,7 +5,11 @@ FROM ghcr.io/actions/actions-runner:2.338.2@sha256:759a1d94a15b05941aba5196974ff
 
 USER root
 
-# Base utilities from apt
+# Base utilities from apt.
+# libatomic1: official Node.js >= 25 linux-x64 binaries are linked against
+# libatomic.so.1; without it a setup-node'd Node 26 dies at exec with an
+# "error while loading shared libraries". The upstream base-image fix
+# (actions/runner#4640) is not in a released runner yet.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         jq \
         git \
@@ -21,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         python3-pip \
         python3-venv \
         zstd \
+        libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # ghac: keep an operator-set ACTIONS_RESULTS_URL across the runner's step-env
