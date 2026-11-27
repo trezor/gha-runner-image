@@ -44,7 +44,7 @@ RUN ln -sf /home/runner/externals/node24/bin/node /usr/local/bin/node \
 
 # yq (mikefarah Go version, installed as a static binary)
 # renovate: datasource=github-releases depName=mikefarah/yq
-ARG YQ_VERSION=v4.53.3
+ARG YQ_VERSION=v4.54.3
 RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
         "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64" \
         -o /usr/local/bin/yq \
