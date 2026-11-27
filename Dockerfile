@@ -28,6 +28,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Node on PATH for tooling that runs before actions/setup-node.
+# The actions-runner base image ships its own Node runtimes under
+# /home/runner/externals/ for JavaScript actions (which it invokes by absolute path),
+# and never exports them - so a `run:` step that shells out to `node` (pnpm 12's
+# preinstall does `node install.js`, pmg's installer does the same) dies with
+# "node: not found" on a bare pod. Symlinking the LTS build matches a GitHub-hosted
+# runner; actions/setup-node still prepends its own version later, so the project's
+# .node-version keeps winning inside the job. A base-image bump that renames the
+# externals directory fails this layer at build time, which is the wanted signal.
+RUN ln -sf /home/runner/externals/node24/bin/node /usr/local/bin/node \
+ && ln -sf /home/runner/externals/node24/bin/npm  /usr/local/bin/npm \
+ && ln -sf /home/runner/externals/node24/bin/npx  /usr/local/bin/npx \
+ && node --version && npm --version
+
 # yq (mikefarah Go version, installed as a static binary)
 # renovate: datasource=github-releases depName=mikefarah/yq
 ARG YQ_VERSION=v4.53.3
